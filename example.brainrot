@@ -1,0 +1,26 @@
+skibidi fizzbuzz(n) {
+    flex (rizz i = 1; i <= n; i++) {
+        edging (i % 3 == 0 && i % 5 == 0) {
+            yapping("FizzBuzz");
+        } amogus edging (i % 3 == 0) {
+            yapping("Fizz");
+        } amogus edging (i % 5 == 0) {
+            yapping("Buzz");
+        } amogus {
+            yapping(i);
+        }
+    }
+}
+rizz n = 15;
+hop on fizzbuzz(n);
+
+skibidi add(a, b) {
+    bussin a + b;
+}
+
+rizz sum = hop on add(5, 10);
+yapping("sum" + sum);
+
+flex (rizz i = 0; i < 10; i++) {
+    yapping(i);
+}

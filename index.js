@@ -596,13 +596,8 @@ function codeGenerator(ast) {
 // Compiler: Combines lexer, parser, and code generator, then evaluates the result
 function compileAndRun(input) {
     const tokens = lexer(input);
-    console.log('Tokens:', JSON.stringify(tokens, null, 4));
-
     const ast = parser(tokens);
-    console.log('AST:', JSON.stringify(ast, null, 2));
-
     const jsCode = codeGenerator(ast);
-    console.log('Generated JavaScript Code:\n', jsCode);
 
     try {
         eval(jsCode);
@@ -611,32 +606,19 @@ function compileAndRun(input) {
     }
 }
 
-// Test with the fizzbuzz example again
-compileAndRun(`
-skibidi fizzbuzz(n) {
-    flex (rizz i = 1; i <= n; i++) {
-        edging (i % 3 == 0 && i % 5 == 0) {
-            yapping("FizzBuzz");
-        } amogus edging (i % 3 == 0) {
-            yapping("Fizz");
-        } amogus edging (i % 5 == 0) {
-            yapping("Buzz");
-        } amogus {
-            yapping(i);
-        }
-    }
-}
-rizz n = 15;
-hop on fizzbuzz(n);
+const fs = require('fs');
 
-skibidi add(a, b) {
-    bussin a + b;
+// read input file from args
+const inputFile = process.argv[2];
+
+if (!inputFile) {
+    console.error('Please provide an input file');
+    process.exit(1);
 }
 
-rizz sum = hop on add(5, 10);
-yapping("sum" + sum);
-
-flex (rizz i = 0; i < 10; i++) {
-    yapping(i);
+const input = fs.readFileSync(inputFile, 'utf8');
+if (!input) {
+    console.error('Failed to read input file');
+    process.exit(1);
 }
-`);
+compileAndRun(input);
