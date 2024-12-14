@@ -1,0 +1,10 @@
+skibidi fibonacci(n) {
+    edging (n < 2) {
+        bussin n;
+    } amogus {
+        bussin hop on fibonacci(n - 1) +  hop on fibonacci(n - 2);
+    }
+}
+
+rizz num = hop on fibonacci(10);
+yapping(num);
