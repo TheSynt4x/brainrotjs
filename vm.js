@@ -63,7 +63,8 @@ class VM {
             // Handle return statements
             if (result && result.type === 'return') {
                 this.currentContext = previousContext;
-                return result.value;
+                // Throw an exception to unwind the call stack
+                throw { type: 'return', value: result.value };
             }
             // Handle break and continue statements
             if (result && (result.type === 'break' || result.type === 'continue')) {
@@ -167,6 +168,8 @@ class VM {
                 // Execute block within a new context for proper scoping
                 const blockContext = new ExecutionContext(this.currentContext);
                 return this.executeBlock(node.body, blockContext);
+            case 'CallExpression':
+                return this.evaluate(node);
             default:
                 throw new Error(`Unsupported statement type: ${node.type}`);
         }
@@ -269,10 +272,19 @@ class VM {
             }
         } else {
             func = this.evaluate(node.callee);
-            if (typeof func !== 'function') {
+            if (typeof func === 'function') {
+                // Built-in function
+                const args = node.arguments.map(arg => this.evaluate(arg));
+                return func(...args);
+            } else if (typeof func === 'object' && func !== null && 'params' in func && 'body' in func) {
+                // User-defined function
+                return this.executeUserFunction(func, node.arguments);
+            } else {
                 throw new TypeError(`${node.callee.value} is not a function`);
             }
         }
+
+        // For member expressions that are functions
         const args = node.arguments.map(arg => this.evaluate(arg));
         return func(...args);
     }
@@ -322,6 +334,45 @@ class VM {
 
     evaluateArray(node) {
         return node.elements.map(element => this.evaluate(element));
+    }
+
+    executeUserFunction(func, args) {
+        // Check if the number of arguments matches the number of parameters
+        if (args.length !== func.params.length) {
+            throw new Error(`Expected ${func.params.length} arguments but got ${args.length}`);
+        }
+
+        // Create a new execution context for the function
+        const functionContext = new ExecutionContext(func.context);
+
+        // Bind arguments to parameters
+        for (let i = 0; i < func.params.length; i++) {
+            const paramName = func.params[i];
+            const argValue = this.evaluate(args[i]);
+            functionContext.setVariable(paramName, argValue);
+        }
+
+        // Execute the function body within the new context
+        const previousContext = this.currentContext;
+        this.currentContext = functionContext;
+
+        let returnValue;
+        try {
+            this.executeBlock(func.body.body, functionContext);
+            // If no return statement is encountered, return undefined
+            returnValue = undefined;
+        } catch (e) {
+            if (e.type === 'return') {
+                returnValue = e.value;
+            } else {
+                throw e; // Re-throw unexpected errors
+            }
+        }
+
+        // Restore the previous context
+        this.currentContext = previousContext;
+
+        return returnValue;
     }
 }
 

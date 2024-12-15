@@ -6,5 +6,5 @@ skibidi fibonacci(n) {
     }
 }
 
-rizz num = hop on fibonacci(10);
+rizz num = hop on fibonacci(0);
 yapping(num);

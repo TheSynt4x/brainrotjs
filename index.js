@@ -364,7 +364,7 @@ function parseCall(tokens) {
     expect(tokens, 'punctuation', ')');
     return {
         type: 'CallExpression',
-        name: funcName.value,
+        callee: { type: 'Identifier', value: funcName.value }, // Correct property
         arguments: args
     };
 }
@@ -605,6 +605,9 @@ const VM = require('./vm');
 function compileAndRun(input) {
     const tokens = lexer(input);
     const ast = parser(tokens);
+
+    // console.log(JSON.stringify(ast, null, 2)); // Debug: Inspect AST
+
     const vm = new VM(ast);
     
     try {
