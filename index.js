@@ -83,7 +83,7 @@ function isExpressionStart(token) {
 // MultiplicativeExpression -> PostfixExpression (('*' | '/' | '%') PostfixExpression)*
 // PostfixExpression -> LeftHandSideExpression (('++' | '--')?)
 // LeftHandSideExpression -> Primary
-// Primary -> Number | String | Identifier | '(' Expression ')' | Call | MemberExpression
+// Primary -> Number | String | Identifier | '(' Expression ')' | Call | MemberExpression | ArrayLiteral
 
 function parseExpression(tokens, stopValues = []) {
     return parseAssignmentExpression(tokens, stopValues);
@@ -289,6 +289,8 @@ function parsePrimary(tokens, stopValues) {
         tokens.shift(); // consume '('
         node = parseExpression(tokens, [')']);
         expect(tokens, 'punctuation', ')');
+    } else if (t.type === 'punctuation' && t.value === '[') {
+        node = parseArrayExpression(tokens);
     } else {
         // If we encounter a stop value, return null
         if (t.type === 'punctuation' && stopValues.includes(t.value)) {
@@ -325,6 +327,25 @@ function parsePrimary(tokens, stopValues) {
     }
 
     return node;
+}
+
+// Parse array literals
+function parseArrayExpression(tokens) {
+    expect(tokens, 'punctuation', '[');
+    const elements = [];
+    while (!(peek(tokens).type === 'punctuation' && peek(tokens).value === ']')) {
+        if (peek(tokens).type === 'punctuation' && peek(tokens).value === ',') {
+            tokens.shift(); // consume ','
+            continue;
+        }
+        const element = parseExpression(tokens, [',', ']']);
+        elements.push(element);
+    }
+    expect(tokens, 'punctuation', ']');
+    return {
+        type: 'ArrayExpression',
+        elements: elements
+    };
 }
 
 // Parse a call expression (after we've handled the 'call' keyword)
@@ -384,6 +405,20 @@ function parseReturnStatement(tokens) {
     return { type: 'ReturnStatement', argument: expr };
 }
 
+// === Added: Parse Break Statement ===
+function parseBreakStatement(tokens) {
+    expect(tokens, 'keyword', 'break'); // Consume 'break' keyword
+    expect(tokens, 'punctuation', ';'); // Consume ';'
+    return { type: 'BreakStatement' };
+}
+
+// === Added: Parse Continue Statement ===
+function parseContinueStatement(tokens) {
+    expect(tokens, 'keyword', 'continue'); // Consume 'continue' keyword
+    expect(tokens, 'punctuation', ';'); // Consume ';'
+    return { type: 'ContinueStatement' };
+}
+
 // Parse if statement: if (condition) { ... } else if { ... } else { ... }
 function parseIfStatement(tokens) {
     expect(tokens, 'punctuation', '(');
@@ -394,9 +429,9 @@ function parseIfStatement(tokens) {
 
     // Check for else
     if (peek(tokens) && peek(tokens).type === 'keyword' && peek(tokens).value === 'else') {
-        tokens.shift(); // consume else
+        tokens.shift(); // consume 'else'
         if (peek(tokens) && peek(tokens).type === 'keyword' && peek(tokens).value === 'if') {
-            tokens.shift(); // consume if (else-if chain)
+            tokens.shift(); // consume 'if' (for else-if)
             alternate = parseIfStatement(tokens);
         } else {
             alternate = parseBlock(tokens);
@@ -404,6 +439,19 @@ function parseIfStatement(tokens) {
     }
 
     return { type: 'IfStatement', test: condition, consequent: consequent, alternate: alternate };
+}
+
+// Parse while statement: while (condition) { ... }
+function parseWhileStatement(tokens) {
+    expect(tokens, 'punctuation', '(');
+    const test = parseExpression(tokens, [')']);
+    expect(tokens, 'punctuation', ')');
+    const body = parseBlock(tokens);
+    return {
+        type: 'WhileStatement',
+        test: test,
+        body: body
+    };
 }
 
 // Parse for statement: for (init; test; update) { ... }
@@ -497,6 +545,11 @@ function parseStatement(tokens) {
         return parseForStatement(tokens);
     }
 
+    if (t.type === 'keyword' && t.value === 'while') {  // Handle 'while'
+        tokens.shift();
+        return parseWhileStatement(tokens);
+    }
+
     if (t.type === 'keyword' && t.value === 'return') {
         tokens.shift();
         return parseReturnStatement(tokens);
@@ -507,14 +560,22 @@ function parseStatement(tokens) {
         return parseVariableDeclaration(tokens);
     }
 
-    // Removed 'yapping' special case
-
     // If a statement starts with 'call', handle it as a standalone call statement
     if (t.type === 'keyword' && t.value === 'call') {
         tokens.shift();
         const callNode = parseCall(tokens);
         expect(tokens, 'punctuation', ';');
         return callNode;
+    }
+
+    // === Added: Handle 'break' statement ===
+    if (t.type === 'keyword' && t.value === 'break') {
+        return parseBreakStatement(tokens);
+    }
+
+    // === Added: Handle 'continue' statement ===
+    if (t.type === 'keyword' && t.value === 'continue') {
+        return parseContinueStatement(tokens);
     }
 
     // Handle Expression Statements
@@ -538,101 +599,24 @@ function parser(tokens) {
     return ast;
 }
 
-// Code Generator
-function codeGenerator(ast) {
-    function genExpr(node) {
-        if (!node) return '';
-        switch (node.type) {
-            case 'BinaryExpression':
-            case 'LogicalExpression':
-                return `(${genExpr(node.left)} ${node.operator} ${genExpr(node.right)})`;
-            case 'StringLiteral':
-                return `"${node.value}"`;
-            case 'Literal':
-                return node.value;
-            case 'Identifier':
-                return node.value;
-            case 'MemberExpression':
-                return `${genExpr(node.object)}${node.computed ? `[${genExpr(node.property)}]` : `.${genExpr(node.property)}`}`;
-            case 'CallExpression':
-                return `${genExpr(node.callee)}(${node.arguments.map(a => genExpr(a)).join(', ')})`;
-            case 'UpdateExpression':
-                return `${genExpr(node.argument)}${node.operator}`;
-            case 'AssignmentExpression':
-                return `${genExpr(node.left)} = ${genExpr(node.right)}`;
-            default:
-                throw new Error(`Unknown expression node type: ${node.type}`);
-        }
-    }
-
-    function gen(node) {
-        switch (node.type) {
-            case 'Program':
-                return node.body.map(gen).join('\n');
-            case 'FunctionDeclaration':
-                return `function ${node.name}(${node.params.join(', ')}) ${gen(node.body)}\n`;
-            case 'BlockStatement':
-                return `{\n${node.body.map(gen).join('\n')}\n}`;
-            case 'VariableDeclaration':
-                return `let ${node.id}${node.init ? ' = ' + genExpr(node.init) : ''};`;
-            case 'StringLiteral':
-                return `"${node.value}";`;
-            case 'Literal':
-                return `${node.value};`;
-            case 'Identifier':
-                return `${node.value};`;
-            case 'CallExpression':
-                return `${genExpr(node)};`;
-            case 'IfStatement':
-                const alt = node.alternate ? ` else ${gen(node.alternate)}` : '';
-                return `if (${genExpr(node.test)}) ${gen(node.consequent)}${alt}`;
-            case 'ForStatement':
-                const init = node.init
-                    ? (node.init.type === 'VariableDeclaration'
-                        ? `let ${node.init.id}${node.init.init ? ' = ' + genExpr(node.init.init) : ''}`
-                        : genExpr(node.init))
-                    : '';
-                const test = node.test ? genExpr(node.test) : '';
-                const update = node.update ? genExpr(node.update) : '';
-                return `for (${init}; ${test}; ${update}) ${gen(node.body)}`;
-            case 'AssignmentExpression':
-                return `${genExpr(node.left)} = ${genExpr(node.right)};`;
-            case 'ReturnStatement':
-                return `return ${genExpr(node.argument)};`;
-            case 'EmptyStatement':
-                return '';
-            case 'MemberExpression':
-                return `${genExpr(node.object)}${node.computed ? `[${genExpr(node.property)}]` : `.${genExpr(node.property)}`};`;
-            case 'ExpressionStatement':
-                return `${genExpr(node.expression)};`;
-            default:
-                throw new Error(`Unknown node type: ${node.type}`);
-        }
-    }
-
-    return gen(ast);
-}
-
+const VM = require('./vm');
 
 // Compiler: Combines lexer, parser, and code generator, then evaluates the result
 function compileAndRun(input) {
     const tokens = lexer(input);
     const ast = parser(tokens);
-    const jsCode = codeGenerator(ast);
-
-    // Prepend 'const yapping = console.log;' to jsCode
-    const fullCode = `const yapping = console.log; const nerdShit = Math;\n${jsCode}`;
-
+    const vm = new VM(ast);
+    
     try {
-        eval(fullCode);
+        vm.run();
     } catch (error) {
-        console.error('Error during execution:', error);
+        console.error('Runtime Error:', error.message);
     }
 }
 
 const fs = require('fs');
 
-// read input file from args
+// Read input file from args
 const inputFile = process.argv[2];
 
 if (!inputFile) {
@@ -646,3 +630,6 @@ if (!input) {
     process.exit(1);
 }
 compileAndRun(input);
+
+// Example usage:
+// node index.js examples/datastructures.brainrot 
