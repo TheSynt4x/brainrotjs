@@ -1,0 +1,14 @@
+skibidi checkPositive(n) {
+    edging (n < 0) {
+        yeet oopsie("Negative number not allowed");
+    } amogus {
+        bussin "Number is positive";
+    }
+}
+
+grind {
+    rizz message = hop on checkPositive(-5);
+    yapping(message);
+} amogus (oopsie e) {
+    yapping("Error:", e.message);
+}

@@ -1,0 +1,23 @@
+skibidi getDayName(day) {
+    ohio (day) {
+        sigma 1:
+            bussin "Monday";
+        sigma 2:
+            bussin "Tuesday";
+        sigma 3:
+            bussin "Wednesday";
+        sigma 4:
+            bussin "Thursday";
+        sigma 5:
+            bussin "Friday";
+        sigma 6:
+            bussin "Saturday";
+        sigma 7:
+            bussin "Sunday";
+        based:
+            bussin "Invalid day";
+    }
+}
+
+rizz dayName = hop on getDayName(3);
+yapping(dayName);

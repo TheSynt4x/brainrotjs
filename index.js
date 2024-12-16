@@ -26,11 +26,10 @@ function lexer(input) {
         'yeet': 'throw',
         'oopsie': 'Error',
         'hop on': 'call',
-        'yapping': 'yapping' // Special keyword for console.log
     };
 
-    // Include && and || in the regex
-    const regex = /(".*?"|hop\s+on|\+\+|\-\-|&&|\|\||[a-zA-Z_][a-zA-Z0-9_]*|\d+|===|!==|<=|>=|==|!=|[\(\)\{\}\;\,\=<>!+\-\*\/%])/g;
+    // Updated regex to include ., [, and ]
+    const regex = /(".*?"|hop\s+on|\+\+|\-\-|&&|\|\||[a-zA-Z_][a-zA-Z0-9_]*|\d+|===|!==|<=|>=|==|!=|[\(\)\{\}\;\,\=<>!+\-\*\/%\.\[\]])/g;
     const words = input.match(regex) || [];
 
     const tokens = [];
@@ -40,10 +39,10 @@ function lexer(input) {
         } else if (!isNaN(parseFloat(word))) {
             tokens.push({ type: 'number', value: word });
         } else if (word.startsWith('"') && word.endsWith('"')) {
-            tokens.push({ type: 'string', value: word });
+            tokens.push({ type: 'string', value: word.slice(1, -1) }); // Remove quotes
         } else if ([
             "(", ")", "{", "}", ";", ",", "=", "<", ">", "!", "+", "-", "*", "/", "%", "++", "--",
-            "<=", ">=", "==", "!=", "===", "!==", "&&", "||"
+            "<=", ">=", "==", "!=", "===", "!==", "&&", "||", ".", "[", "]"
         ].includes(word)) {
             tokens.push({ type: 'punctuation', value: word });
         } else {
@@ -66,6 +65,12 @@ function peek(tokens) {
     return tokens[0];
 }
 
+// Helper function to determine if a token can start an expression
+function isExpressionStart(token) {
+    return ['identifier', 'number', 'string', 'punctuation'].includes(token.type) &&
+           (token.type !== 'punctuation' || token.value === '(' || token.value === '[' || token.value === '{');
+}
+
 // === Expression Parsing ===
 //
 // Expression -> AssignmentExpression
@@ -76,8 +81,9 @@ function peek(tokens) {
 // RelationalExpression -> AdditiveExpression (('<' | '>' | '<=' | '>=') AdditiveExpression)*
 // AdditiveExpression -> MultiplicativeExpression (('+' | '-') MultiplicativeExpression)*
 // MultiplicativeExpression -> PostfixExpression (('*' | '/' | '%') PostfixExpression)*
-// PostfixExpression -> Primary (('++' | '--')?)
-// Primary -> Number | String | Identifier | '(' Expression ')' | Call
+// PostfixExpression -> LeftHandSideExpression (('++' | '--')?)
+// LeftHandSideExpression -> Primary
+// Primary -> Number | String | Identifier | '(' Expression ')' | Call | MemberExpression | ArrayLiteral
 
 function parseExpression(tokens, stopValues = []) {
     return parseAssignmentExpression(tokens, stopValues);
@@ -199,7 +205,7 @@ function parseMultiplicativeExpression(tokens, stopValues) {
 
 // parsePostfixExpression to handle i++, i--
 function parsePostfixExpression(tokens, stopValues) {
-    let node = parsePrimary(tokens, stopValues);
+    let node = parseLeftHandSideExpression(tokens, stopValues);
     while (peek(tokens) && peek(tokens).type === 'punctuation' && (peek(tokens).value === '++' || peek(tokens).value === '--') && !stopValues.includes(peek(tokens).value)) {
         const op = tokens.shift().value;
         node = {
@@ -212,44 +218,134 @@ function parsePostfixExpression(tokens, stopValues) {
     return node;
 }
 
+function parseCallExpression(callee, tokens) {
+    expect(tokens, 'punctuation', '(');
+    const args = [];
+    while (!(peek(tokens).type === 'punctuation' && peek(tokens).value === ')')) {
+        if (peek(tokens).type === 'punctuation' && peek(tokens).value === ',') {
+            tokens.shift(); // consume ','
+            continue;
+        }
+        const arg = parseExpression(tokens, [',', ')']);
+        args.push(arg);
+    }
+    expect(tokens, 'punctuation', ')');
+    return {
+        type: 'CallExpression',
+        callee: callee,
+        arguments: args
+    };
+}
+
+function parseLeftHandSideExpression(tokens, stopValues) {
+    let node = parsePrimary(tokens, stopValues);
+    while (true) {
+        if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === '(') {
+            node = parseCallExpression(node, tokens);
+        } else if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === '.') {
+            tokens.shift(); // consume '.'
+            const property = expect(tokens, 'identifier').value;
+            node = {
+                type: 'MemberExpression',
+                object: node,
+                property: { type: 'Identifier', value: property },
+                computed: false
+            };
+        } else if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === '[') {
+            tokens.shift(); // consume '['
+            const property = parseExpression(tokens, [']']);
+            expect(tokens, 'punctuation', ']');
+            node = {
+                type: 'MemberExpression',
+                object: node,
+                property: property,
+                computed: true
+            };
+        } else {
+            break;
+        }
+    }
+    return node;
+}
+
 function parsePrimary(tokens, stopValues) {
+    let node;
     const t = peek(tokens);
     if (!t) throw new Error('Unexpected end of tokens in parsePrimary');
 
     if (t.type === 'number') {
         tokens.shift();
-        return { type: 'Literal', value: parseFloat(t.value) };
-    }
-
-    if (t.type === 'string') {
+        node = { type: 'Literal', value: parseFloat(t.value) };
+    } else if (t.type === 'string') {
         tokens.shift();
-        return { type: 'StringLiteral', value: t.value };
-    }
-
-    if (t.type === 'identifier') {
+        node = { type: 'StringLiteral', value: t.value };
+    } else if (t.type === 'identifier') {
         tokens.shift();
-        return { type: 'Identifier', value: t.value };
-    }
-
-    // If we have a 'call' keyword here, parse a call expression as a primary
-    if (t.type === 'keyword' && t.value === 'call') {
+        node = { type: 'Identifier', value: t.value };
+    } else if (t.type === 'keyword' && t.value === 'call') {
         tokens.shift(); // consume 'call'
-        return parseCall(tokens);
-    }
-
-    if (t.type === 'punctuation' && t.value === '(') {
+        node = parseCall(tokens);
+    } else if (t.type === 'punctuation' && t.value === '(') {
         tokens.shift(); // consume '('
-        const expr = parseExpression(tokens, [')']);
+        node = parseExpression(tokens, [')']);
         expect(tokens, 'punctuation', ')');
-        return expr;
+    } else if (t.type === 'punctuation' && t.value === '[') {
+        node = parseArrayExpression(tokens);
+    } else {
+        // If we encounter a stop value, return null
+        if (t.type === 'punctuation' && stopValues.includes(t.value)) {
+            return null;
+        }
+        throw new Error(`Unexpected token in parsePrimary: ${JSON.stringify(t)}`);
     }
 
-    // If we encounter a stop value, return null
-    if (t.type === 'punctuation' && stopValues.includes(t.value)) {
-        return null;
+    // Handle member expressions
+    while (peek(tokens) && (
+        (peek(tokens).type === 'punctuation' && peek(tokens).value === '.') ||
+        (peek(tokens).type === 'punctuation' && peek(tokens).value === '[')
+    )) {
+        if (peek(tokens).value === '.') {
+            tokens.shift(); // consume '.'
+            const property = expect(tokens, 'identifier');
+            node = {
+                type: 'MemberExpression',
+                object: node,
+                property: { type: 'Identifier', value: property.value },
+                computed: false
+            };
+        } else if (peek(tokens).value === '[') {
+            tokens.shift(); // consume '['
+            const property = parseExpression(tokens, [']']);
+            expect(tokens, 'punctuation', ']');
+            node = {
+                type: 'MemberExpression',
+                object: node,
+                property: property,
+                computed: true
+            };
+        }
     }
 
-    throw new Error(`Unexpected token in parsePrimary: ${JSON.stringify(t)}`);
+    return node;
+}
+
+// Parse array literals
+function parseArrayExpression(tokens) {
+    expect(tokens, 'punctuation', '[');
+    const elements = [];
+    while (!(peek(tokens).type === 'punctuation' && peek(tokens).value === ']')) {
+        if (peek(tokens).type === 'punctuation' && peek(tokens).value === ',') {
+            tokens.shift(); // consume ','
+            continue;
+        }
+        const element = parseExpression(tokens, [',', ']']);
+        elements.push(element);
+    }
+    expect(tokens, 'punctuation', ']');
+    return {
+        type: 'ArrayExpression',
+        elements: elements
+    };
 }
 
 // Parse a call expression (after we've handled the 'call' keyword)
@@ -268,30 +364,7 @@ function parseCall(tokens) {
     expect(tokens, 'punctuation', ')');
     return {
         type: 'CallExpression',
-        name: funcName.value,
-        arguments: args
-    };
-}
-
-// Parse a yapping call: yapping(...)
-function parseYappingCall(tokens) {
-    expect(tokens, 'punctuation', '(');
-    const args = [];
-    while (!(peek(tokens).type === 'punctuation' && peek(tokens).value === ')')) {
-        if (peek(tokens).type === 'punctuation' && peek(tokens).value === ',') {
-            tokens.shift();
-            continue;
-        }
-        const arg = parseExpression(tokens, [',', ')']);
-        args.push(arg);
-    }
-    expect(tokens, 'punctuation', ')');
-    if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === ';') {
-        tokens.shift();
-    }
-    return {
-        type: 'CallExpression',
-        name: 'yapping',
+        callee: { type: 'Identifier', value: funcName.value }, // Correct property
         arguments: args
     };
 }
@@ -332,6 +405,20 @@ function parseReturnStatement(tokens) {
     return { type: 'ReturnStatement', argument: expr };
 }
 
+// === Added: Parse Break Statement ===
+function parseBreakStatement(tokens) {
+    expect(tokens, 'keyword', 'break'); // Consume 'break' keyword
+    expect(tokens, 'punctuation', ';'); // Consume ';'
+    return { type: 'BreakStatement' };
+}
+
+// === Added: Parse Continue Statement ===
+function parseContinueStatement(tokens) {
+    expect(tokens, 'keyword', 'continue'); // Consume 'continue' keyword
+    expect(tokens, 'punctuation', ';'); // Consume ';'
+    return { type: 'ContinueStatement' };
+}
+
 // Parse if statement: if (condition) { ... } else if { ... } else { ... }
 function parseIfStatement(tokens) {
     expect(tokens, 'punctuation', '(');
@@ -342,9 +429,9 @@ function parseIfStatement(tokens) {
 
     // Check for else
     if (peek(tokens) && peek(tokens).type === 'keyword' && peek(tokens).value === 'else') {
-        tokens.shift(); // consume else
+        tokens.shift(); // consume 'else'
         if (peek(tokens) && peek(tokens).type === 'keyword' && peek(tokens).value === 'if') {
-            tokens.shift(); // consume if (else-if chain)
+            tokens.shift(); // consume 'if' (for else-if)
             alternate = parseIfStatement(tokens);
         } else {
             alternate = parseBlock(tokens);
@@ -352,6 +439,19 @@ function parseIfStatement(tokens) {
     }
 
     return { type: 'IfStatement', test: condition, consequent: consequent, alternate: alternate };
+}
+
+// Parse while statement: while (condition) { ... }
+function parseWhileStatement(tokens) {
+    expect(tokens, 'punctuation', '(');
+    const test = parseExpression(tokens, [')']);
+    expect(tokens, 'punctuation', ')');
+    const body = parseBlock(tokens);
+    return {
+        type: 'WhileStatement',
+        test: test,
+        body: body
+    };
 }
 
 // Parse for statement: for (init; test; update) { ... }
@@ -445,6 +545,11 @@ function parseStatement(tokens) {
         return parseForStatement(tokens);
     }
 
+    if (t.type === 'keyword' && t.value === 'while') {  // Handle 'while'
+        tokens.shift();
+        return parseWhileStatement(tokens);
+    }
+
     if (t.type === 'keyword' && t.value === 'return') {
         tokens.shift();
         return parseReturnStatement(tokens);
@@ -455,54 +560,30 @@ function parseStatement(tokens) {
         return parseVariableDeclaration(tokens);
     }
 
-    if (t.type === 'keyword' && t.value === 'yapping') {
-        tokens.shift();
-        return parseYappingCall(tokens);
-    }
-
     // If a statement starts with 'call', handle it as a standalone call statement
     if (t.type === 'keyword' && t.value === 'call') {
         tokens.shift();
         const callNode = parseCall(tokens);
+        expect(tokens, 'punctuation', ';');
         return callNode;
     }
 
-    if (t.type === 'identifier') {
-        // Could be an assignment or a standalone identifier
-        const ident = tokens.shift();
-        if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === '=') {
-            tokens.shift(); // consume '='
-            const expr = parseExpression(tokens, [';']);
-            expect(tokens, 'punctuation', ';');
-            return {
-                type: 'AssignmentExpression',
-                operator: '=',
-                left: { type: 'Identifier', value: ident.value },
-                right: expr
-            };
-        } else {
-            if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === ';') {
-                tokens.shift();
-            }
-            return { type: 'Identifier', value: ident.value };
-        }
+    // === Added: Handle 'break' statement ===
+    if (t.type === 'keyword' && t.value === 'break') {
+        return parseBreakStatement(tokens);
     }
 
-    if (t.type === 'string') {
-        const str = tokens.shift();
-        if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === ';') tokens.shift();
-        return { type: 'StringLiteral', value: str.value };
+    // === Added: Handle 'continue' statement ===
+    if (t.type === 'keyword' && t.value === 'continue') {
+        return parseContinueStatement(tokens);
     }
 
-    if (t.type === 'number') {
-        const num = tokens.shift();
-        if (peek(tokens) && peek(tokens).type === 'punctuation' && peek(tokens).value === ';') tokens.shift();
-        return { type: 'Literal', value: parseFloat(num.value) };
-    }
-
-    if (t.type === 'punctuation') {
-        tokens.shift();
-        return { type: 'EmptyStatement' };
+    // Handle Expression Statements
+    // This includes function calls, expressions, etc.
+    if (isExpressionStart(t)) {
+        const expr = parseExpression(tokens, [';']);
+        expect(tokens, 'punctuation', ';');
+        return { type: 'ExpressionStatement', expression: expr };
     }
 
     throw new Error(`Unexpected token in statement: ${JSON.stringify(t)}`);
@@ -518,97 +599,27 @@ function parser(tokens) {
     return ast;
 }
 
-// Code Generator
-function codeGenerator(ast) {
-    function genExpr(node) {
-        if (!node) return '';
-        switch (node.type) {
-            case 'BinaryExpression':
-            case 'LogicalExpression':
-                return `${genExpr(node.left)} ${node.operator} ${genExpr(node.right)}`;
-            case 'StringLiteral':
-                return node.value;
-            case 'Literal':
-                return node.value;
-            case 'Identifier':
-                return node.value;
-            case 'CallExpression':
-                let funcName = node.name;
-                // Translate yapping to console.log
-                if (funcName === 'yapping') {
-                    funcName = 'console.log';
-                }
-                const args = node.arguments.map(a => genExpr(a)).join(', ');
-                return `${funcName}(${args})`;
-            case 'UpdateExpression':
-                return genExpr(node.argument) + node.operator;
-            case 'AssignmentExpression':
-                return `${genExpr(node.left)} = ${genExpr(node.right)}`;
-            default:
-                throw new Error(`Unknown expression node type: ${node.type}`);
-        }
-    }
-
-    function gen(node) {
-        switch (node.type) {
-            case 'Program':
-                return node.body.map(gen).join('\n');
-            case 'FunctionDeclaration':
-                return `function ${node.name}(${node.params.join(', ')}) ${gen(node.body)}\n`;
-            case 'BlockStatement':
-                return `{\n${node.body.map(gen).join('\n')}\n}`;
-            case 'VariableDeclaration':
-                return `let ${node.id}${node.init ? ' = ' + genExpr(node.init) : ''};`;
-            case 'StringLiteral':
-                return `${node.value};`;
-            case 'Literal':
-                return `${node.value};`;
-            case 'Identifier':
-                return `${node.value};`;
-            case 'CallExpression':
-                return genExpr(node) + ';';
-            case 'IfStatement':
-                const alt = node.alternate ? ` else ${gen(node.alternate)}` : '';
-                return `if (${genExpr(node.test)}) ${gen(node.consequent)}${alt}`;
-            case 'ForStatement':
-                const init = node.init
-                    ? (node.init.type === 'VariableDeclaration'
-                        ? `let ${node.init.id}${node.init.init ? ' = ' + genExpr(node.init.init) : ''}`
-                        : genExpr(node.init))
-                    : '';
-                const test = node.test ? genExpr(node.test) : '';
-                const update = node.update ? genExpr(node.update) : '';
-                return `for (${init}; ${test}; ${update}) ${gen(node.body)}`;
-            case 'AssignmentExpression':
-                return `${genExpr(node.left)} = ${genExpr(node.right)};`;
-            case 'ReturnStatement':
-                return `return ${genExpr(node.argument)};`;
-            case 'EmptyStatement':
-                return '';
-            default:
-                throw new Error(`Unknown node type: ${node.type}`);
-        }
-    }
-
-    return gen(ast);
-}
+const VM = require('./vm');
 
 // Compiler: Combines lexer, parser, and code generator, then evaluates the result
 function compileAndRun(input) {
     const tokens = lexer(input);
     const ast = parser(tokens);
-    const jsCode = codeGenerator(ast);
 
+    // console.log(JSON.stringify(ast, null, 2)); // Debug: Inspect AST
+
+    const vm = new VM(ast);
+    
     try {
-        eval(jsCode);
+        vm.run();
     } catch (error) {
-        console.error('Error during execution:', error);
+        console.error('Runtime Error:', error.message);
     }
 }
 
 const fs = require('fs');
 
-// read input file from args
+// Read input file from args
 const inputFile = process.argv[2];
 
 if (!inputFile) {
@@ -622,3 +633,6 @@ if (!input) {
     process.exit(1);
 }
 compileAndRun(input);
+
+// Example usage:
+// node index.js examples/datastructures.brainrot 

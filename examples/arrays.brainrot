@@ -1,0 +1,5 @@
+rizz a = [1, 2, 3, 4, 5];
+
+flex (rizz i = 0; i < 5; i++) {
+    yapping(a[i]);
+}

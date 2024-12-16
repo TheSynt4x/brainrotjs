@@ -1,0 +1,10 @@
+skibidi factorial(n) {
+    edging (n === 0) {
+        bussin 1;
+    } amogus {
+        bussin n * hop on factorial(n - 1);
+    }
+}
+
+rizz result = hop on factorial(5);
+yapping(result);
